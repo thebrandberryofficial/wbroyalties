@@ -218,13 +218,7 @@ function swallowStreamError(error: unknown) {
   if (name === "AbortError" || name === "ERR_STREAM_PREMATURE_CLOSE") return
 }
 
-function nodeStreamFromWeb(
-  body: ReadableStream<Uint8Array>,
-  onBytes?: (bytesRead: number) => void
-): Readable {
-  const source = Readable.fromWeb(body as unknown as NodeWebReadableStream<Uint8Array>, {
-    highWaterMark: 64 * 1024,
-  })
+function countBytes(source: Readable, onBytes?: (bytesRead: number) => void): Readable {
   source.on("error", swallowStreamError)
 
   let bytesRead = 0
@@ -239,36 +233,52 @@ function nodeStreamFromWeb(
     })
   )
   counted.on("error", swallowStreamError)
+  // pipe() doesn't forward errors from the source to the piped stream.
+  source.on("error", (error) => counted.destroy(error))
   return counted
 }
 
 /**
- * Streams an .xlsx from a remote URL (e.g. Vercel Blob) without buffering the
- * whole file. .xlsx is a zip, so it cannot be split into independent 25MB file
- * slices — instead rows are parsed incrementally and flushed in ~25MB batches.
+ * Streams an .xlsx stored as ordered byte slices (e.g. Vercel Blob parts)
+ * without buffering the whole file: each slice is downloaded in turn and
+ * concatenated into one stream. .xlsx is a zip, so the slices aren't
+ * independently parseable — rows are parsed incrementally and flushed in
+ * ~25MB batches instead.
  */
-export async function streamRoyaltyRowsFromUrl(
-  fileUrl: string,
+export async function streamRoyaltyRowsFromUrls(
+  fileUrls: string[],
+  totalBytes: number | null,
   onBatch: (rows: ParsedRoyaltyRow[]) => Promise<void>,
   options: StreamRoyaltyOptions = {}
 ): Promise<StreamResult> {
   const abort = new AbortController()
-  const response = await fetch(fileUrl, { signal: abort.signal, cache: "no-store" })
-  if (!response.ok || !response.body) {
-    abort.abort()
-    throw new Error("Couldn't download the uploaded file.")
+
+  async function* downloadSlices() {
+    for (const url of fileUrls) {
+      const response = await fetch(url, { signal: abort.signal, cache: "no-store" })
+      if (!response.ok || !response.body) {
+        throw new Error("Couldn't download the uploaded file.")
+      }
+      for await (const chunk of Readable.fromWeb(
+        response.body as unknown as NodeWebReadableStream<Uint8Array>
+      )) {
+        yield chunk as Uint8Array
+      }
+    }
   }
 
-  const totalBytesHeader = response.headers.get("content-length")
-  const totalBytes = totalBytesHeader ? Number(totalBytesHeader) : null
-  const totalBytesOrNull = Number.isFinite(totalBytes) && (totalBytes as number) > 0 ? totalBytes : null
+  const stream = countBytes(Readable.from(downloadSlices(), { objectMode: false }), (bytesRead) => {
+    options.onFileBytes?.(bytesRead, totalBytes)
+  })
 
-  const stream = nodeStreamFromWeb(response.body, (bytesRead) => {
-    options.onFileBytes?.(bytesRead, totalBytesOrNull)
+  // ExcelJS doesn't surface errors from its input stream, so a failed slice
+  // download would leave the parser waiting forever — fail the import instead.
+  const downloadFailed = new Promise<never>((_, reject) => {
+    stream.once("error", reject)
   })
 
   try {
-    return await streamRoyaltyRows(stream, onBatch, options)
+    return await Promise.race([streamRoyaltyRows(stream, onBatch, options), downloadFailed])
   } finally {
     abort.abort()
     stream.destroy()

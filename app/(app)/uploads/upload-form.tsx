@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { upload } from "@vercel/blob/client"
 import { AlertCircle, Copy, UploadCloud } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -70,6 +69,70 @@ type ImportProgress = {
   totalBytes: number | null
 }
 
+// Server functions reject request bodies over 4.5MB, so the file is sent in
+// slices below that and reassembled on the server during the import.
+const CHUNK_BYTES = 4 * 1024 * 1024
+const PARALLEL_CHUNK_UPLOADS = 4
+const CHUNK_ATTEMPTS = 3
+
+async function uploadChunk(
+  uploadId: string,
+  index: number,
+  data: Blob,
+  signal: AbortSignal
+): Promise<string> {
+  let lastError: unknown = null
+  for (let attempt = 1; attempt <= CHUNK_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(`/api/uploads/chunk?uploadId=${uploadId}&index=${index}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: data,
+        signal,
+      })
+      const result = (await response.json().catch(() => null)) as
+        | { url?: string; error?: string }
+        | null
+      if (response.ok && result?.url) return result.url
+      lastError = new Error(result?.error ?? `Upload failed with status ${response.status}.`)
+      // Auth and validation failures won't succeed on retry.
+      if (response.status >= 400 && response.status < 500) break
+    } catch (error) {
+      if (signal.aborted) throw error
+      lastError = error
+    }
+    await new Promise((resolve) => setTimeout(resolve, attempt * 1000))
+  }
+  throw lastError
+}
+
+async function uploadFileInChunks(
+  file: File,
+  signal: AbortSignal,
+  onProgress: (percentage: number) => void
+): Promise<string[]> {
+  const uploadId = crypto.randomUUID()
+  const chunkCount = Math.max(1, Math.ceil(file.size / CHUNK_BYTES))
+  const urls: string[] = new Array(chunkCount)
+  let nextIndex = 0
+  let uploadedBytes = 0
+
+  async function worker() {
+    while (nextIndex < chunkCount) {
+      const index = nextIndex++
+      const data = file.slice(index * CHUNK_BYTES, (index + 1) * CHUNK_BYTES)
+      urls[index] = await uploadChunk(uploadId, index, data, signal)
+      uploadedBytes += data.size
+      onProgress((uploadedBytes / file.size) * 100)
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(PARALLEL_CHUNK_UPLOADS, chunkCount) }, worker)
+  )
+  return urls
+}
+
 function formatEta(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
@@ -111,24 +174,27 @@ export function UploadForm({ batches }: { batches: BatchRow[] }) {
 
     setUploading(true)
     try {
-      const blob = await upload(file.name, file, {
-        access: "public",
-        handleUploadUrl: "/api/uploads/blob-token",
-        multipart: true,
-        // Some Windows browsers report no MIME type at all for .xlsx files
-        // (file.type is ""), which makes the blob API reject the upload.
-        // Force the correct content type instead of relying on detection.
-        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        abortSignal: controller.signal,
-        onUploadProgress: ({ percentage }) => setUploadPercent(percentage),
-      })
+      setUploadPercent(0)
+      let blobUrls: string[]
+      try {
+        blobUrls = await uploadFileInChunks(file, controller.signal, setUploadPercent)
+      } catch (uploadError) {
+        if (uploadError instanceof DOMException && uploadError.name === "AbortError") throw uploadError
+        setError(
+          `Couldn't upload the file: ${
+            uploadError instanceof Error ? uploadError.message : "please check your connection and try again."
+          }`
+        )
+        return
+      }
       setUploadPercent(100)
 
       const response = await fetch("/api/uploads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          blobUrl: blob.url,
+          blobUrls,
+          totalBytes: file.size,
           fileName: file.name,
           replaceBatchId: replaceBatchId || undefined,
         }),

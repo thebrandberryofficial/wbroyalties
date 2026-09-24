@@ -7,7 +7,7 @@ import { UploadBatch } from "@/models/UploadBatch"
 import { RoyaltyRecord } from "@/models/RoyaltyRecord"
 import { IsrcClaim } from "@/models/IsrcClaim"
 import {
-  streamRoyaltyRowsFromUrl,
+  streamRoyaltyRowsFromUrls,
   type ParsedRoyaltyRow,
 } from "@/lib/royalty-import"
 import { ensureVendorAccounts, type NewVendorCredential } from "@/lib/vendor-provisioning"
@@ -30,6 +30,24 @@ type UploadEvent =
 
 const ISRC_CLAIM_FLUSH_SIZE = 1_000
 
+// Only slices stored in this project's own Blob store may be downloaded, so
+// the import can't be pointed at arbitrary URLs.
+function isOwnBlobUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false
+  const storeId = process.env.BLOB_STORE_ID?.replace(/^store_/, "").toLowerCase()
+  try {
+    const url = new URL(value)
+    return (
+      url.protocol === "https:" &&
+      url.hostname.endsWith(".public.blob.vercel-storage.com") &&
+      (!storeId || url.hostname.startsWith(`${storeId}.`)) &&
+      url.pathname.startsWith("/uploads/")
+    )
+  } catch {
+    return false
+  }
+}
+
 export async function POST(request: Request) {
   const encoder = new TextEncoder()
 
@@ -40,7 +58,7 @@ export async function POST(request: Request) {
       }
 
       let batchId: mongoose.Types.ObjectId | null = null
-      let blobUrlToDelete: string | null = null
+      let blobUrlsToDelete: string[] = []
 
       try {
         const session = await auth()
@@ -49,7 +67,12 @@ export async function POST(request: Request) {
           return
         }
 
-        let body: { blobUrl?: unknown; fileName?: unknown; replaceBatchId?: unknown }
+        let body: {
+          blobUrls?: unknown
+          totalBytes?: unknown
+          fileName?: unknown
+          replaceBatchId?: unknown
+        }
         try {
           body = await request.json()
         } catch {
@@ -57,12 +80,13 @@ export async function POST(request: Request) {
           return
         }
 
-        const { blobUrl, fileName, replaceBatchId } = body
+        const { blobUrls, totalBytes, fileName, replaceBatchId } = body
 
-        if (typeof blobUrl !== "string" || !blobUrl) {
+        if (!Array.isArray(blobUrls) || blobUrls.length === 0 || !blobUrls.every(isOwnBlobUrl)) {
           send({ type: "error", error: "No file was uploaded." })
           return
         }
+        blobUrlsToDelete = blobUrls
         if (typeof fileName !== "string" || !fileName.toLowerCase().endsWith(".xlsx")) {
           send({ type: "error", error: "Only .xlsx files are supported." })
           return
@@ -85,8 +109,6 @@ export async function POST(request: Request) {
           status: "processing",
         })
         batchId = batch._id
-
-        blobUrlToDelete = blobUrl
 
         if (typeof replaceBatchId === "string" && replaceBatchId.length > 0) {
           await RoyaltyRecord.deleteMany({ batchId: replaceBatchId })
@@ -146,8 +168,9 @@ export async function POST(request: Request) {
         }
 
         let lastFileEventAt = 0
-        const { rowCount, skippedRowCount } = await streamRoyaltyRowsFromUrl(
-          blobUrl,
+        const { rowCount, skippedRowCount } = await streamRoyaltyRowsFromUrls(
+          blobUrls,
+          typeof totalBytes === "number" && totalBytes > 0 ? totalBytes : null,
           async (rows) => {
             const unknownVendors = new Set<string>()
             for (const row of rows) {
@@ -239,8 +262,8 @@ export async function POST(request: Request) {
         }
         send({ type: "error", error: errorMessage })
       } finally {
-        if (blobUrlToDelete) {
-          await del(blobUrlToDelete).catch((deleteError) => {
+        if (blobUrlsToDelete.length > 0) {
+          await del(blobUrlsToDelete).catch((deleteError) => {
             console.error("[uploads] failed to delete blob:", deleteError)
           })
         }
