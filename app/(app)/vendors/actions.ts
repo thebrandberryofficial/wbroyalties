@@ -6,6 +6,7 @@ import { z } from "zod"
 
 import { auth } from "@/lib/auth"
 import { connectToDatabase } from "@/lib/mongodb"
+import { invalidateRoyaltyData } from "@/lib/royalty-cache"
 import { Admin } from "@/models/Admin"
 import { ensureVendorAccounts } from "@/lib/vendor-provisioning"
 
@@ -50,6 +51,7 @@ export async function createVendor(
 
   const { newVendors } = await ensureVendorAccounts(new Set([parsed.data.vendorName]))
 
+  invalidateRoyaltyData()
   revalidatePath("/vendors")
   return { success: true, tempPassword: newVendors[0]?.tempPassword }
 }
@@ -96,6 +98,7 @@ export async function updateVendor(
     ytCommissionPercent,
   })
 
+  invalidateRoyaltyData()
   revalidatePath("/vendors")
   return { success: true }
 }
@@ -144,5 +147,6 @@ export async function deleteVendor(id: string) {
   await requireSuperAdmin()
   await connectToDatabase()
   await Admin.findByIdAndDelete(id)
+  invalidateRoyaltyData()
   revalidatePath("/vendors")
 }

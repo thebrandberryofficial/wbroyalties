@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 
 import { auth } from "@/lib/auth"
 import { connectToDatabase } from "@/lib/mongodb"
+import { invalidateRoyaltyData } from "@/lib/royalty-cache"
 import { UploadBatch } from "@/models/UploadBatch"
 import { RoyaltyRecord } from "@/models/RoyaltyRecord"
 import { IsrcClaim } from "@/models/IsrcClaim"
@@ -39,6 +40,7 @@ export async function deleteBatch(id: string) {
 
   await UploadBatch.findByIdAndDelete(id)
 
+  invalidateRoyaltyData()
   revalidatePath("/uploads")
   revalidatePath("/dashboard")
   revalidatePath("/analytics")

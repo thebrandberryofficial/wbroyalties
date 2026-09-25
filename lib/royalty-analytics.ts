@@ -1,7 +1,11 @@
 import mongoose from "mongoose"
+import { unstable_cache } from "next/cache"
 
 import { RoyaltyRecord } from "@/models/RoyaltyRecord"
+import { commissionPercentExpression } from "@/lib/commission"
+import { ROYALTY_DATA_TAG } from "@/lib/royalty-cache"
 import { Admin } from "@/models/Admin"
+import { UploadBatch } from "@/models/UploadBatch"
 
 export type AnalyticsFilters = {
   vendorId?: string
@@ -141,34 +145,15 @@ function toRankedRows(rows: RawGroupRow[]): RankedRow[] {
   }))
 }
 
-export async function getAnalytics(filters: AnalyticsFilters): Promise<AnalyticsResult> {
+async function computeAnalytics(filters: AnalyticsFilters): Promise<AnalyticsResult> {
   const match = buildMatchStage(filters)
+  const commissionPercent = await commissionPercentExpression()
 
   const [result] = await RoyaltyRecord.aggregate([
     { $match: match },
     {
-      $lookup: {
-        from: "admins",
-        localField: "vendorId",
-        foreignField: "_id",
-        as: "vendor",
-      },
-    },
-    { $unwind: { path: "$vendor", preserveNullAndEmptyArrays: true } },
-    {
       $addFields: {
-        commissionPercent: {
-          $ifNull: [
-            {
-              $cond: [
-                { $eq: ["$dspBreak", "Youtube"] },
-                "$vendor.ytCommissionPercent",
-                "$vendor.ottCommissionPercent",
-              ],
-            },
-            25,
-          ],
-        },
+        commissionPercent,
         summaryKey: {
           $ifNull: [
             "$summaryMonthKey",
@@ -466,7 +451,7 @@ export type FilterOptions = {
   postedPeriodCodeOptions: string[]
 }
 
-export async function getFilterOptions(): Promise<FilterOptions> {
+async function computeFilterOptions(): Promise<FilterOptions> {
   const [vendors, revDspOptions, countryOptions, revenueTypeOptions, labelOptions, postedPeriodCodeOptions] =
     await Promise.all([
       Admin.find({ role: "vendor" }).sort({ vendorName: 1 }).select({ vendorName: 1 }).lean(),
@@ -489,4 +474,42 @@ export async function getFilterOptions(): Promise<FilterOptions> {
       .filter((v): v is string => Boolean(v))
       .sort(),
   }
+}
+
+// Results only change when data is uploaded/deleted or a vendor is edited.
+// Uploads bump the data version below (so a new import shows up even if the
+// uploader closed the tab mid-import); batch deletes and vendor edits
+// invalidate ROYALTY_DATA_TAG. Repeat page loads skip the full-collection
+// aggregation; the daily revalidate is just a safety net.
+const CACHE_OPTIONS = { tags: [ROYALTY_DATA_TAG], revalidate: 24 * 60 * 60 }
+
+/** Cheap fingerprint of the imported data, used as part of the cache key. */
+async function royaltyDataVersion(): Promise<string> {
+  const [latest, batchCount] = await Promise.all([
+    UploadBatch.findOne().sort({ updatedAt: -1 }).select({ updatedAt: 1 }).lean(),
+    UploadBatch.estimatedDocumentCount(),
+  ])
+  return `${batchCount}:${latest?.updatedAt?.getTime() ?? 0}`
+}
+
+const cachedAnalytics = unstable_cache(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- only part of the cache key
+  (filters: AnalyticsFilters, _dataVersion: string) => computeAnalytics(filters),
+  ["royalty-analytics"],
+  CACHE_OPTIONS
+)
+
+const cachedFilterOptions = unstable_cache(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- only part of the cache key
+  (_dataVersion: string) => computeFilterOptions(),
+  ["royalty-filter-options"],
+  CACHE_OPTIONS
+)
+
+export async function getAnalytics(filters: AnalyticsFilters): Promise<AnalyticsResult> {
+  return cachedAnalytics(filters, await royaltyDataVersion())
+}
+
+export async function getFilterOptions(): Promise<FilterOptions> {
+  return cachedFilterOptions(await royaltyDataVersion())
 }

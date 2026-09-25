@@ -2,6 +2,7 @@ import mongoose from "mongoose"
 import ExcelJS from "exceljs"
 
 import { RoyaltyRecord } from "@/models/RoyaltyRecord"
+import { commissionPercentExpression } from "@/lib/commission"
 import { EXPECTED_HEADERS } from "@/lib/royalty-import"
 
 export type ReportFilters = {
@@ -87,32 +88,13 @@ type SummaryRow = {
 /** Groups by vendor + month, computing payout from each vendor's commission rate (same logic as the analytics dashboard). */
 export async function getSummaryRows(filters: ReportFilters): Promise<SummaryRow[]> {
   const match = buildRoyaltyMatch(filters)
+  const commissionPercent = await commissionPercentExpression()
 
   const rows = await RoyaltyRecord.aggregate([
     { $match: match },
     {
-      $lookup: {
-        from: "admins",
-        localField: "vendorId",
-        foreignField: "_id",
-        as: "vendor",
-      },
-    },
-    { $unwind: { path: "$vendor", preserveNullAndEmptyArrays: true } },
-    {
       $addFields: {
-        commissionPercent: {
-          $ifNull: [
-            {
-              $cond: [
-                { $eq: ["$dspBreak", "Youtube"] },
-                "$vendor.ytCommissionPercent",
-                "$vendor.ottCommissionPercent",
-              ],
-            },
-            25,
-          ],
-        },
+        commissionPercent,
         summaryKey: {
           $ifNull: [
             "$summaryMonthKey",
