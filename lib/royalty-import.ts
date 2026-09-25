@@ -153,13 +153,24 @@ function createReader(stream: Readable) {
   })
 }
 
+/**
+ * YouTube vs. other-platform split, which decides whether a vendor's YouTube or
+ * OTT commission applies. Exports often leave "DSP Break" blank, so fall back
+ * to the platform name in "Rev DSP". Only YouTube itself gets the YouTube
+ * rate — YouTube Music is settled at the OTT rate like other music platforms.
+ */
+export function parseDspBreak(dspBreak: string | null, revDsp: string | null): "Youtube" | "Others" | null {
+  if (dspBreak === "Youtube" || dspBreak === "Others") return dspBreak
+  if (!revDsp) return null
+  return revDsp.trim().toLowerCase() === "youtube" ? "Youtube" : "Others"
+}
+
 function toRow(headerMap: HeaderMap, values: ExcelJS.CellValue[]): ParsedRoyaltyRow | null {
   const vendorName = cellText(values[headerMap.vendorName])
   if (!vendorName) return null
 
-  const dspBreakRaw = cellText(values[headerMap.dspBreak])
-  const dspBreak =
-    dspBreakRaw === "Youtube" ? "Youtube" : dspBreakRaw === "Others" ? "Others" : null
+  const revDsp = cellText(values[headerMap.revDsp])
+  const dspBreak = parseDspBreak(cellText(values[headerMap.dspBreak]), revDsp)
 
   const transactionMonthForSummary = cellText(values[headerMap.transactionMonthForSummary])
   const summaryMonth = parseSummaryMonth(transactionMonthForSummary)
@@ -180,7 +191,7 @@ function toRow(headerMap: HeaderMap, values: ExcelJS.CellValue[]): ParsedRoyalty
     saleType: cellText(values[headerMap.saleType]),
     saleUnits: cellNumber(values[headerMap.saleUnits]),
     grossRevenue: cellNumber(values[headerMap.grossRevenue]),
-    revDsp: cellText(values[headerMap.revDsp]),
+    revDsp,
     period: cellText(values[headerMap.period]),
     postedPeriodCode: cellText(values[headerMap.postedPeriodCode]),
     dspBreak,
