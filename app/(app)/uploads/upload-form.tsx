@@ -275,6 +275,9 @@ export function UploadForm({ batches }: { batches: BatchRow[] }) {
           } else if (evt.type === "error") {
             finished = true
             setError(evt.error)
+            // Some rows may have been imported before the failure; drop cached
+            // pages so the dashboard doesn't keep showing pre-upload numbers.
+            router.refresh()
           }
         }
       }
