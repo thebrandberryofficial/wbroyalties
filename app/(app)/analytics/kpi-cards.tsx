@@ -12,6 +12,7 @@ export function KpiCards({
   summary,
   showVendorCount = true,
   showGrossRevenue = false,
+  payoutLabel = "Payout",
 }: {
   summary: {
     totalGrossRevenue: number
@@ -24,6 +25,7 @@ export function KpiCards({
   }
   showVendorCount?: boolean
   showGrossRevenue?: boolean
+  payoutLabel?: string
 }) {
   const stats = [
     ...(showGrossRevenue
@@ -36,7 +38,7 @@ export function KpiCards({
         ]
       : []),
     {
-      label: "Payout",
+      label: payoutLabel,
       value: formatCurrency(summary.totalPayout),
       icon: HandCoins,
     },

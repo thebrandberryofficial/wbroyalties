@@ -34,7 +34,7 @@ export function PlatformPieChart({ data }: { data: PlatformPoint[] }) {
     <Card className="h-full">
       <CardHeader>
         <CardTitle>Platform distribution</CardTitle>
-        <CardDescription>Gross revenue share by streaming platform (DSP).</CardDescription>
+        <CardDescription>Revenue share by streaming platform (DSP).</CardDescription>
       </CardHeader>
       <CardContent>
         {total === 0 ? (

@@ -144,7 +144,7 @@ export async function buildSummaryWorkbook(filters: ReportFilters, hideGrossReve
     { header: "Vendor", key: "vendorName", width: 28 },
     { header: "Month", key: "monthLabel", width: 14 },
     ...(hideGrossRevenue ? [] : [{ header: "Gross Revenue", key: "grossRevenue", width: 16 }]),
-    { header: "Payout", key: "payout", width: 16 },
+    { header: hideGrossRevenue ? "Revenue" : "Payout", key: "payout", width: 16 },
     { header: "Units", key: "units", width: 12 },
   ]
   for (const row of rows) {

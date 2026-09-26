@@ -35,7 +35,7 @@ export function RevenueTrendChart({
         <CardDescription>
           {showGrossRevenue
             ? "Gross revenue and vendor payout by transaction month."
-            : "Your payout by transaction month."}
+            : "Your revenue by transaction month."}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -93,7 +93,7 @@ export function RevenueTrendChart({
               <Line
                 type="monotone"
                 dataKey="payout"
-                name="Vendor payout"
+                name={showGrossRevenue ? "Vendor payout" : "Your revenue"}
                 stroke="var(--chart-2)"
                 strokeWidth={2}
                 dot={false}

@@ -89,6 +89,14 @@ export type AnalyticsResult = {
 
 const PLATFORM_FOLD_LIMIT = 5
 
+/**
+ * "admin" sees gross revenue alongside vendor payouts. "vendor" must never see
+ * gross revenue: every amount, ranking and percentage is based on the vendor's
+ * own commission-adjusted amount (YouTube rows at their YouTube rate, all other
+ * platforms at their OTT rate).
+ */
+export type AnalyticsView = "admin" | "vendor"
+
 /** Excludes docs missing `field` so they don't collapse into one misleading "Unknown" bucket. */
 function notNullOrEmpty(field: string) {
   return { [field]: { $nin: [null, ""] } }
@@ -145,7 +153,10 @@ function toRankedRows(rows: RawGroupRow[]): RankedRow[] {
   }))
 }
 
-async function computeAnalytics(filters: AnalyticsFilters): Promise<AnalyticsResult> {
+async function computeAnalytics(
+  filters: AnalyticsFilters,
+  view: AnalyticsView
+): Promise<AnalyticsResult> {
   const match = buildMatchStage(filters)
   const commissionPercent = await commissionPercentExpression()
 
@@ -168,6 +179,10 @@ async function computeAnalytics(filters: AnalyticsFilters): Promise<AnalyticsRes
         payout: { $multiply: ["$grossRevenue", { $divide: ["$commissionPercent", 100] }] },
       },
     },
+    // For vendors, swap each row's gross for their own amount before anything
+    // is summed, so every total, ranking, share and per-stream figure below is
+    // computed from what the vendor earns — and gross never leaves the query.
+    ...(view === "vendor" ? [{ $set: { grossRevenue: "$payout" } }] : []),
     {
       $facet: {
         summary: [
@@ -494,7 +509,8 @@ async function royaltyDataVersion(): Promise<string> {
 
 const cachedAnalytics = unstable_cache(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- only part of the cache key
-  (filters: AnalyticsFilters, _dataVersion: string) => computeAnalytics(filters),
+  (filters: AnalyticsFilters, view: AnalyticsView, _dataVersion: string) =>
+    computeAnalytics(filters, view),
   ["royalty-analytics"],
   CACHE_OPTIONS
 )
@@ -506,8 +522,11 @@ const cachedFilterOptions = unstable_cache(
   CACHE_OPTIONS
 )
 
-export async function getAnalytics(filters: AnalyticsFilters): Promise<AnalyticsResult> {
-  return cachedAnalytics(filters, await royaltyDataVersion())
+export async function getAnalytics(
+  filters: AnalyticsFilters,
+  view: AnalyticsView
+): Promise<AnalyticsResult> {
+  return cachedAnalytics(filters, view, await royaltyDataVersion())
 }
 
 export async function getFilterOptions(): Promise<FilterOptions> {

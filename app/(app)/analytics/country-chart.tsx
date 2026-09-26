@@ -27,7 +27,7 @@ export function CountryChart({
         <CardTitle>Revenue by country</CardTitle>
         <CardDescription>
           {topCountry
-            ? `${topCountry.label} accounts for ${topCountry.share.toFixed(1)}% of gross revenue.`
+            ? `${topCountry.label} accounts for ${topCountry.share.toFixed(1)}% of revenue.`
             : "Market concentration by country."}
         </CardDescription>
       </CardHeader>

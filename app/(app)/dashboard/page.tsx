@@ -43,7 +43,7 @@ export default async function DashboardPage() {
   }
 
   const [analytics, recentUploads] = await Promise.all([
-    getAnalytics({ vendorId: lockedVendorId }),
+    getAnalytics({ vendorId: lockedVendorId }, isVendor ? "vendor" : "admin"),
     isVendor
       ? Promise.resolve([])
       : UploadBatch.find().sort({ createdAt: -1 }).limit(5).lean(),
@@ -66,6 +66,7 @@ export default async function DashboardPage() {
         summary={analytics.summary}
         showVendorCount={!isVendor}
         showGrossRevenue={!isVendor}
+        payoutLabel={isVendor ? "Your revenue" : "Payout"}
       />
 
       <HighlightCards

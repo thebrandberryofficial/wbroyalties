@@ -62,7 +62,7 @@ export default async function AnalyticsPage({
   }
 
   const [analytics, filterOptions] = await Promise.all([
-    getAnalytics(filters),
+    getAnalytics(filters, isVendor ? "vendor" : "admin"),
     isVendor ? Promise.resolve(null) : getFilterOptions(),
   ])
 
@@ -86,6 +86,7 @@ export default async function AnalyticsPage({
       <KpiCards
         summary={analytics.summary}
         showVendorCount={!isVendor}
+        payoutLabel={isVendor ? "Your revenue" : "Payout"}
         // showGrossRevenue={!isVendor}
       />
 

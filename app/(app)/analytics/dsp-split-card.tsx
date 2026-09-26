@@ -22,7 +22,7 @@ export function DspSplitCard({ data }: { data: DspSplitPoint[] }) {
     <Card>
       <CardHeader>
         <CardTitle>OTT vs YouTube</CardTitle>
-        <CardDescription>Share of gross revenue by commission category.</CardDescription>
+        <CardDescription>Share of revenue by commission category.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {total === 0 ? (
