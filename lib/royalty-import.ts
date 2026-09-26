@@ -26,8 +26,14 @@ export const EXPECTED_HEADERS = {
   transactionMonthForSummary: "Transaction Month For Summary",
 } as const
 
+/** Columns read when present; older exports don't have them. */
+export const OPTIONAL_HEADERS = {
+  globalCustomerName: "Global Customer Name",
+} as const
+
 type ColumnKey = keyof typeof EXPECTED_HEADERS
-type HeaderMap = Record<ColumnKey, number>
+type OptionalColumnKey = keyof typeof OPTIONAL_HEADERS
+type HeaderMap = Record<ColumnKey, number> & Partial<Record<OptionalColumnKey, number>>
 
 export type ParsedRoyaltyRow = {
   catalogNumber: string | null
@@ -51,6 +57,7 @@ export type ParsedRoyaltyRow = {
   dspBreak: "Youtube" | "Others" | null
   customerRevenueType: string | null
   transactionMonthForSummary: string | null
+  globalCustomerName: string | null
   summaryMonthKey: string | null
   summaryMonthLabel: string | null
 }
@@ -97,6 +104,14 @@ function buildHeaderMap(headerRowValues: ExcelJS.CellValue[]): HeaderMap {
     throw new Error(
       `The uploaded file is missing expected column(s): ${missing.join(", ")}`
     )
+  }
+
+  for (const [key, headerText] of Object.entries(OPTIONAL_HEADERS) as [
+    OptionalColumnKey,
+    string,
+  ][]) {
+    const index = indexByText.get(headerText)
+    if (index !== undefined) map[key] = index
   }
 
   return map
@@ -154,15 +169,21 @@ function createReader(stream: Readable) {
 }
 
 /**
- * YouTube vs. other-platform split, which decides whether a vendor's YouTube or
- * OTT commission applies. Exports often leave "DSP Break" blank, so fall back
- * to the platform name in "Rev DSP". Only YouTube itself gets the YouTube
- * rate — YouTube Music is settled at the OTT rate like other music platforms.
+ * YouTube vs. other-platform split, which drives the Platform filter and
+ * whether a vendor's YouTube or OTT commission applies. Exports leave "DSP
+ * Break" blank, so the platform is taken from "Global Customer Name" (or "Rev
+ * DSP" in older exports without it). Only YouTube itself counts as YouTube —
+ * YouTube Music is settled at the OTT rate like other music platforms.
  */
-export function parseDspBreak(dspBreak: string | null, revDsp: string | null): "Youtube" | "Others" | null {
+export function parseDspBreak(
+  dspBreak: string | null,
+  globalCustomerName: string | null,
+  revDsp: string | null
+): "Youtube" | "Others" | null {
   if (dspBreak === "Youtube" || dspBreak === "Others") return dspBreak
-  if (!revDsp) return null
-  return revDsp.trim().toLowerCase() === "youtube" ? "Youtube" : "Others"
+  const platform = globalCustomerName ?? revDsp
+  if (!platform) return null
+  return platform.trim().toLowerCase() === "youtube" ? "Youtube" : "Others"
 }
 
 function toRow(headerMap: HeaderMap, values: ExcelJS.CellValue[]): ParsedRoyaltyRow | null {
@@ -170,7 +191,11 @@ function toRow(headerMap: HeaderMap, values: ExcelJS.CellValue[]): ParsedRoyalty
   if (!vendorName) return null
 
   const revDsp = cellText(values[headerMap.revDsp])
-  const dspBreak = parseDspBreak(cellText(values[headerMap.dspBreak]), revDsp)
+  const globalCustomerName =
+    headerMap.globalCustomerName === undefined
+      ? null
+      : cellText(values[headerMap.globalCustomerName])
+  const dspBreak = parseDspBreak(cellText(values[headerMap.dspBreak]), globalCustomerName, revDsp)
 
   const transactionMonthForSummary = cellText(values[headerMap.transactionMonthForSummary])
   const summaryMonth = parseSummaryMonth(transactionMonthForSummary)
@@ -197,6 +222,7 @@ function toRow(headerMap: HeaderMap, values: ExcelJS.CellValue[]): ParsedRoyalty
     dspBreak,
     customerRevenueType: cellText(values[headerMap.customerRevenueType]),
     transactionMonthForSummary,
+    globalCustomerName,
     summaryMonthKey: summaryMonth?.key ?? null,
     summaryMonthLabel: summaryMonth?.label ?? null,
   }

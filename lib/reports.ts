@@ -23,7 +23,9 @@ export function buildRoyaltyMatch(filters: ReportFilters) {
   if (filters.vendorId && mongoose.isValidObjectId(filters.vendorId)) {
     match.vendorId = new mongoose.Types.ObjectId(filters.vendorId)
   }
-  if (filters.dspBreak) match.dspBreak = filters.dspBreak
+  if (filters.dspBreak) {
+    match.dspBreak = filters.dspBreak === "Youtube" ? "Youtube" : { $ne: "Youtube" }
+  }
   if (filters.revDsp) match.revDsp = filters.revDsp
   if (filters.country) match.country = filters.country
   if (filters.revenueType) match.customerRevenueType = filters.revenueType
@@ -32,7 +34,12 @@ export function buildRoyaltyMatch(filters: ReportFilters) {
   if (filters.dateFrom || filters.dateTo) {
     const range: Record<string, Date> = {}
     if (filters.dateFrom) range.$gte = new Date(filters.dateFrom)
-    if (filters.dateTo) range.$lte = new Date(filters.dateTo)
+    if (filters.dateTo) {
+      // Exclusive upper bound so the "to" date includes that whole day.
+      const end = new Date(filters.dateTo)
+      end.setUTCDate(end.getUTCDate() + 1)
+      range.$lt = end
+    }
     match.transactionDate = range
   }
 

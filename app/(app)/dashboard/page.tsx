@@ -5,7 +5,7 @@ import { ArrowRight, Tags, UploadCloud } from "lucide-react"
 import { auth } from "@/lib/auth"
 import { connectToDatabase } from "@/lib/mongodb"
 import { UploadBatch } from "@/models/UploadBatch"
-import { getAnalytics } from "@/lib/royalty-analytics"
+import { getAnalytics, getLatestTransactionDate } from "@/lib/royalty-analytics"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -20,6 +20,7 @@ import { KpiCards } from "../analytics/kpi-cards"
 import { HighlightCards } from "../analytics/highlight-cards"
 import { RevenueTrendChart } from "../analytics/revenue-trend-chart"
 import { RankedList } from "../analytics/top-performers-card"
+import { DateRangePicker, type DashboardRange } from "./date-range-picker"
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -31,7 +32,39 @@ const statusVariant = {
   failed: "destructive",
 } as const
 
-export default async function DashboardPage() {
+type SearchParams = { [key: string]: string | string[] | undefined }
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function isoDate(value: string | undefined): string | undefined {
+  return value && ISO_DATE.test(value) && !Number.isNaN(Date.parse(value)) ? value : undefined
+}
+
+function daysBefore(date: string, days: number): string {
+  const d = new Date(date)
+  d.setUTCDate(d.getUTCDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
+function formatDate(date: string): string {
+  return new Date(date).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  })
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>
+}) {
+  const params = await searchParams
   const session = await auth()
   await connectToDatabase()
 
@@ -42,8 +75,43 @@ export default async function DashboardPage() {
     lockedVendorId = session!.user.id
   }
 
+  // Date range: all time (cumulative) by default, last 30/90 days, or custom.
+  const requestedRange = first(params.range)
+  let range: DashboardRange =
+    requestedRange === "30d" || requestedRange === "90d" || requestedRange === "custom"
+      ? requestedRange
+      : "all"
+  let dateFrom: string | undefined
+  let dateTo: string | undefined
+  let caption = "Showing cumulative metrics across all data."
+
+  if (range === "30d" || range === "90d") {
+    const days = range === "30d" ? 30 : 90
+    const latest = await getLatestTransactionDate(lockedVendorId)
+    if (latest) {
+      dateTo = latest
+      dateFrom = daysBefore(latest, days - 1)
+      caption = `Last ${days} days of data: ${formatDate(dateFrom)} – ${formatDate(dateTo)}`
+    } else {
+      caption = "No data yet."
+    }
+  } else if (range === "custom") {
+    dateFrom = isoDate(first(params.from))
+    dateTo = isoDate(first(params.to))
+    if (dateFrom && dateTo && dateFrom > dateTo) [dateFrom, dateTo] = [dateTo, dateFrom]
+    if (!dateFrom && !dateTo) {
+      range = "all"
+    } else {
+      caption = dateFrom && dateTo
+        ? `${formatDate(dateFrom)} – ${formatDate(dateTo)}`
+        : dateFrom
+          ? `From ${formatDate(dateFrom)}`
+          : `Up to ${formatDate(dateTo!)}`
+    }
+  }
+
   const [analytics, recentUploads] = await Promise.all([
-    getAnalytics({ vendorId: lockedVendorId }, isVendor ? "vendor" : "admin"),
+    getAnalytics({ vendorId: lockedVendorId, dateFrom, dateTo }, isVendor ? "vendor" : "admin"),
     isVendor
       ? Promise.resolve([])
       : UploadBatch.find().sort({ createdAt: -1 }).limit(5).lean(),
@@ -61,6 +129,14 @@ export default async function DashboardPage() {
             : "A quick overview of business performance across all vendors."}
         </p>
       </div>
+
+      <DateRangePicker
+        key={`${range}-${dateFrom ?? ""}-${dateTo ?? ""}`}
+        range={range}
+        from={dateFrom}
+        to={dateTo}
+        caption={caption}
+      />
 
       <KpiCards
         summary={analytics.summary}

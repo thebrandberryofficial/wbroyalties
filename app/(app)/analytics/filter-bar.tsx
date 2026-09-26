@@ -34,6 +34,12 @@ async function fetchTrackSuggestions(query: string): Promise<TrackResult[]> {
 
 const ALL = "__all__"
 
+const PLATFORM_LABELS: Record<string, string> = {
+  [ALL]: "All platforms",
+  Youtube: "YouTube",
+  Others: "Other",
+}
+
 export function FilterBar({
   options,
   current,
@@ -50,7 +56,6 @@ export function FilterBar({
   const [dateFrom, setDateFrom] = useState(current.dateFrom ?? "")
   const [dateTo, setDateTo] = useState(current.dateTo ?? "")
   const [dspBreak, setDspBreak] = useState(current.dspBreak ?? "")
-  const [revDsp, setRevDsp] = useState(current.revDsp ?? "")
   const [country, setCountry] = useState(current.country ?? "")
   const [revenueType, setRevenueType] = useState(current.revenueType ?? "")
   const [label, setLabel] = useState(current.label ?? "")
@@ -64,7 +69,6 @@ export function FilterBar({
       dateFrom,
       dateTo,
       dspBreak,
-      revDsp,
       country,
       revenueType,
       label,
@@ -87,7 +91,6 @@ export function FilterBar({
     setDateFrom("")
     setDateTo("")
     setDspBreak("")
-    setRevDsp("")
     setCountry("")
     setRevenueType("")
     setLabel("")
@@ -158,7 +161,7 @@ export function FilterBar({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs text-muted-foreground">Category</span>
+          <span className="text-xs text-muted-foreground">Platform</span>
           <Select
             value={dspBreak || ALL}
             onValueChange={(value) => {
@@ -167,42 +170,16 @@ export function FilterBar({
               apply({ dspBreak: next })
             }}
           >
-            <SelectTrigger className="w-32">
-              <SelectValue placeholder="All" />
+            <SelectTrigger className="w-36">
+              <SelectValue>{(value: string) => PLATFORM_LABELS[value] ?? PLATFORM_LABELS[ALL]}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL}>All</SelectItem>
-              <SelectItem value="Others">OTT</SelectItem>
+              <SelectItem value={ALL}>All platforms</SelectItem>
               <SelectItem value="Youtube">YouTube</SelectItem>
+              <SelectItem value="Others">Other</SelectItem>
             </SelectContent>
           </Select>
         </div>
-
-        {options && options.revDspOptions.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs text-muted-foreground">Platform</span>
-            <Select
-              value={revDsp || ALL}
-              onValueChange={(value) => {
-                const next = value === ALL ? "" : (value ?? "")
-                setRevDsp(next)
-                apply({ revDsp: next })
-              }}
-            >
-              <SelectTrigger className="w-36">
-                <SelectValue placeholder="All platforms" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All platforms</SelectItem>
-                {options.revDspOptions.map((platform) => (
-                  <SelectItem key={platform} value={platform}>
-                    {platform}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
 
         {options && options.countryOptions.length > 0 && (
           <div className="flex flex-col gap-1.5">

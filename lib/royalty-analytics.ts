@@ -97,6 +97,13 @@ const PLATFORM_FOLD_LIMIT = 5
  */
 export type AnalyticsView = "admin" | "vendor"
 
+/** Exclusive upper bound so a "to" date (YYYY-MM-DD) includes that whole day. */
+function endOfDay(date: string): Date {
+  const end = new Date(date)
+  end.setUTCDate(end.getUTCDate() + 1)
+  return end
+}
+
 /** Excludes docs missing `field` so they don't collapse into one misleading "Unknown" bucket. */
 function notNullOrEmpty(field: string) {
   return { [field]: { $nin: [null, ""] } }
@@ -109,7 +116,9 @@ function buildMatchStage(filters: AnalyticsFilters) {
     match.vendorId = new mongoose.Types.ObjectId(filters.vendorId)
   }
   if (filters.dspBreak) {
-    match.dspBreak = filters.dspBreak
+    // "Other" is every platform except YouTube, including rows with no
+    // platform recorded, so YouTube + Other always adds up to the total.
+    match.dspBreak = filters.dspBreak === "Youtube" ? "Youtube" : { $ne: "Youtube" }
   }
   if (filters.revDsp) {
     match.revDsp = filters.revDsp
@@ -132,7 +141,7 @@ function buildMatchStage(filters: AnalyticsFilters) {
   if (filters.dateFrom || filters.dateTo) {
     const range: Record<string, Date> = {}
     if (filters.dateFrom) range.$gte = new Date(filters.dateFrom)
-    if (filters.dateTo) range.$lte = new Date(filters.dateTo)
+    if (filters.dateTo) range.$lt = endOfDay(filters.dateTo)
     match.transactionDate = range
   }
   if (filters.q && filters.q.trim().length > 0) {
@@ -531,4 +540,30 @@ export async function getAnalytics(
 
 export async function getFilterOptions(): Promise<FilterOptions> {
   return cachedFilterOptions(await royaltyDataVersion())
+}
+
+const cachedLatestTransactionDate = unstable_cache(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- only part of the cache key
+  async (vendorId: string | null, _dataVersion: string): Promise<string | null> => {
+    const match: Record<string, unknown> = { transactionDate: { $ne: null } }
+    if (vendorId && mongoose.isValidObjectId(vendorId)) {
+      match.vendorId = new mongoose.Types.ObjectId(vendorId)
+    }
+    const latest = await RoyaltyRecord.findOne(match)
+      .sort({ transactionDate: -1 })
+      .select({ transactionDate: 1 })
+      .lean()
+    return latest?.transactionDate ? latest.transactionDate.toISOString().slice(0, 10) : null
+  },
+  ["royalty-latest-transaction-date"],
+  CACHE_OPTIONS
+)
+
+/**
+ * Most recent transaction date (YYYY-MM-DD) in the data, optionally for one
+ * vendor. Royalty reports arrive months after the sales they cover, so
+ * "last 30/90 days" presets count back from this date rather than today.
+ */
+export async function getLatestTransactionDate(vendorId?: string): Promise<string | null> {
+  return cachedLatestTransactionDate(vendorId ?? null, await royaltyDataVersion())
 }

@@ -52,7 +52,6 @@ export default async function AnalyticsPage({
       first(params.dspBreak) === "Youtube" || first(params.dspBreak) === "Others"
         ? (first(params.dspBreak) as "Youtube" | "Others")
         : undefined,
-    revDsp: first(params.revDsp),
     country: first(params.country),
     revenueType: first(params.revenueType),
     label: first(params.label),

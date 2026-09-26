@@ -25,6 +25,7 @@ const RoyaltyRecordSchema = new Schema(
     postedPeriodCode: { type: String, trim: true },
     customerRevenueType: { type: String, trim: true },
     transactionMonthForSummary: { type: String, trim: true },
+    globalCustomerName: { type: String, trim: true },
     summaryMonthKey: { type: String, trim: true },
     summaryMonthLabel: { type: String, trim: true },
   },
@@ -33,6 +34,7 @@ const RoyaltyRecordSchema = new Schema(
 
 RoyaltyRecordSchema.index({ vendorId: 1, transactionDate: 1 })
 RoyaltyRecordSchema.index({ batchId: 1 })
+RoyaltyRecordSchema.index({ transactionDate: -1 })
 RoyaltyRecordSchema.index({ vendorName: 1 })
 RoyaltyRecordSchema.index({ summaryMonthKey: 1 })
 RoyaltyRecordSchema.index({ revDsp: 1 })

@@ -7,7 +7,6 @@ import {
   CardDescription,
   CardContent,
 } from "@/components/ui/card"
-import { formatCurrency, formatNumber } from "@/lib/format"
 import type { RankedRow } from "@/lib/royalty-analytics"
 
 type Highlight = (RankedRow & { share: number }) | null
@@ -31,15 +30,9 @@ function HighlightCard({
       </CardHeader>
       <CardContent>
         {highlight ? (
-          <div className="flex flex-col gap-1">
-            <span className="truncate font-heading text-lg font-medium text-foreground">
-              {highlight.label}
-            </span>
-            <span className="text-muted-foreground">
-              {formatCurrency(highlight.grossRevenue)} · {highlight.share.toFixed(1)}% of revenue ·{" "}
-              {formatNumber(highlight.units)} units
-            </span>
-          </div>
+          <span className="truncate font-heading text-lg font-medium text-foreground">
+            {highlight.label}
+          </span>
         ) : (
           <span className="text-muted-foreground">No data</span>
         )}
