@@ -86,7 +86,7 @@ export default async function AnalyticsPage({
       <KpiCards
         summary={analytics.summary}
         showVendorCount={!isVendor}
-        payoutLabel={isVendor ? "Your revenue" : "Payout"}
+        payoutLabel={isVendor ? "Total revenue" : "Payout"}
         // showGrossRevenue={!isVendor}
       />
 

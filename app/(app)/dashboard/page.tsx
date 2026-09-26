@@ -66,7 +66,7 @@ export default async function DashboardPage() {
         summary={analytics.summary}
         showVendorCount={!isVendor}
         showGrossRevenue={!isVendor}
-        payoutLabel={isVendor ? "Your revenue" : "Payout"}
+        payoutLabel={isVendor ? "Total revenue" : "Payout"}
       />
 
       <HighlightCards
