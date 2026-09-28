@@ -56,7 +56,7 @@ export default async function ReportsPage() {
         description={
           isVendor
             ? "Your revenue and units grouped by month."
-            : "Gross revenue, payout, and units grouped by vendor and month."
+            : "Gross revenue, total revenue, and units grouped by vendor and month."
         }
         apiPath="/api/reports/summary"
         vendorOptions={filterOptions?.vendors}

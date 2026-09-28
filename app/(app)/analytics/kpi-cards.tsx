@@ -12,7 +12,7 @@ export function KpiCards({
   summary,
   showVendorCount = true,
   showGrossRevenue = false,
-  payoutLabel = "Payout",
+  payoutLabel = "Total revenue",
 }: {
   summary: {
     totalGrossRevenue: number
