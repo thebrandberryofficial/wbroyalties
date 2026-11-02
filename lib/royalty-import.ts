@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs"
 import { Readable, Transform } from "node:stream"
-import type { ReadableStream as NodeWebReadableStream } from "node:stream/web"
+import { reorderedXlsx, urlSlicesSource, type ByteSource } from "@/lib/xlsx-reorder"
 
 export const EXPECTED_HEADERS = {
   catalogNumber: "Catalog Number",
@@ -289,23 +289,29 @@ export async function streamRoyaltyRowsFromUrls(
   options: StreamRoyaltyOptions = {}
 ): Promise<StreamResult> {
   const abort = new AbortController()
-
-  async function* downloadSlices() {
-    for (const url of fileUrls) {
-      const response = await fetch(url, { signal: abort.signal, cache: "no-store" })
-      if (!response.ok || !response.body) {
-        throw new Error("Couldn't download the uploaded file.")
-      }
-      for await (const chunk of Readable.fromWeb(
-        response.body as unknown as NodeWebReadableStream<Uint8Array>
-      )) {
-        yield chunk as Uint8Array
-      }
-    }
+  try {
+    const source = await urlSlicesSource(fileUrls, abort.signal)
+    return await streamRoyaltyRowsFromSource(source, onBatch, {
+      ...options,
+      onFileBytes: (bytesRead) => options.onFileBytes?.(bytesRead, totalBytes ?? source.size),
+    })
+  } finally {
+    abort.abort()
   }
+}
 
-  const stream = countBytes(Readable.from(downloadSlices(), { objectMode: false }), (bytesRead) => {
-    options.onFileBytes?.(bytesRead, totalBytes)
+/**
+ * Streams rows from an .xlsx exposed as a ByteSource. The archive is read with
+ * its worksheets last (see reorderedXlsx) so ExcelJS parses rows straight from
+ * the download instead of unpacking the worksheet to disk first.
+ */
+export async function streamRoyaltyRowsFromSource(
+  source: ByteSource,
+  onBatch: (rows: ParsedRoyaltyRow[]) => Promise<void>,
+  options: StreamRoyaltyOptions = {}
+): Promise<StreamResult> {
+  const stream = countBytes(Readable.from(reorderedXlsx(source), { objectMode: false }), (bytesRead) => {
+    options.onFileBytes?.(bytesRead, source.size)
   })
 
   // ExcelJS doesn't surface errors from its input stream, so a failed slice
@@ -317,7 +323,6 @@ export async function streamRoyaltyRowsFromUrls(
   try {
     return await Promise.race([streamRoyaltyRows(stream, onBatch, options), downloadFailed])
   } finally {
-    abort.abort()
     stream.destroy()
   }
 }
