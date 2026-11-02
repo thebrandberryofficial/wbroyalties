@@ -11,18 +11,9 @@ export type ByteSource = {
 /**
  * A file stored as ordered slices at public URLs (see /api/uploads/chunk),
  * read with HTTP range requests so any byte range can be fetched on its own.
+ * `sizes` are the exact byte sizes of the slices, in order.
  */
-export async function urlSlicesSource(urls: string[], signal: AbortSignal): Promise<ByteSource> {
-  const sizes = await Promise.all(
-    urls.map(async (url) => {
-      const response = await fetch(url, { method: "HEAD", signal, cache: "no-store" })
-      const length = Number(response.headers.get("content-length"))
-      if (!response.ok || !Number.isFinite(length)) {
-        throw new Error("Couldn't download the uploaded file.")
-      }
-      return length
-    })
-  )
+export function urlSlicesSource(urls: string[], sizes: number[], signal: AbortSignal): ByteSource {
   const starts: number[] = []
   let size = 0
   for (const length of sizes) {
@@ -39,7 +30,9 @@ export async function urlSlicesSource(urls: string[], signal: AbortSignal): Prom
       const from = Math.max(start, sliceStart) - sliceStart
       const to = Math.min(end, sliceEnd) - sliceStart // exclusive
       const response = await fetch(urls[i], {
-        headers: { Range: `bytes=${from}-${to - 1}` },
+        // identity: a compressed partial response wouldn't line up with the
+        // byte offsets requested.
+        headers: { Range: `bytes=${from}-${to - 1}`, "Accept-Encoding": "identity" },
         signal,
         cache: "no-store",
       })
@@ -48,7 +41,13 @@ export async function urlSlicesSource(urls: string[], signal: AbortSignal): Prom
       }
 
       // A server that ignores Range sends the whole slice (200, not 206).
-      let skip = response.status === 206 ? 0 : from
+      let skip = 0
+      if (response.status === 206) {
+        const rangeStart = Number(/bytes (\d+)-/.exec(response.headers.get("content-range") ?? "")?.[1])
+        if (rangeStart !== from) throw new Error("Couldn't download the uploaded file.")
+      } else {
+        skip = from
+      }
       let remaining = to - from
       for await (const chunk of Readable.fromWeb(
         response.body as unknown as NodeWebReadableStream<Uint8Array>
@@ -66,6 +65,9 @@ export async function urlSlicesSource(urls: string[], signal: AbortSignal): Prom
         remaining -= bytes.length
         if (bytes.length > 0) yield bytes
         if (remaining <= 0) break
+      }
+      if (remaining > 0) {
+        throw new Error("The uploaded file couldn't be read completely. Please try uploading it again.")
       }
     }
   }

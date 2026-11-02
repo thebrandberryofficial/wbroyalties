@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs"
+import { head } from "@vercel/blob"
 import { Readable, Transform } from "node:stream"
 import { reorderedXlsx, urlSlicesSource, type ByteSource } from "@/lib/xlsx-reorder"
 
@@ -290,7 +291,14 @@ export async function streamRoyaltyRowsFromUrls(
 ): Promise<StreamResult> {
   const abort = new AbortController()
   try {
-    const source = await urlSlicesSource(fileUrls, abort.signal)
+    // Exact slice sizes from the Blob API; a CDN HEAD response may omit or
+    // alter Content-Length, which would make the archive look truncated.
+    const sizes = await Promise.all(fileUrls.map(async (url) => (await head(url)).size))
+    const fileSize = sizes.reduce((sum, size) => sum + size, 0)
+    if (totalBytes !== null && fileSize !== totalBytes) {
+      throw new Error("The uploaded file is incomplete. Please try uploading it again.")
+    }
+    const source = urlSlicesSource(fileUrls, sizes, abort.signal)
     return await streamRoyaltyRowsFromSource(source, onBatch, {
       ...options,
       onFileBytes: (bytesRead) => options.onFileBytes?.(bytesRead, totalBytes ?? source.size),
