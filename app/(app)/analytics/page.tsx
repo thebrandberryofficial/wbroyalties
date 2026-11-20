@@ -1,10 +1,12 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 
 import { auth } from "@/lib/auth"
 import { connectToDatabase } from "@/lib/mongodb"
 import { Admin } from "@/models/Admin"
 import { getAnalytics, getFilterOptions, type AnalyticsFilters } from "@/lib/royalty-analytics"
 import { FilterBar } from "./filter-bar"
+import { ContentSkeleton } from "./content-skeleton"
 import { KpiCards } from "./kpi-cards"
 import { HighlightCards } from "./highlight-cards"
 import { DspSplitCard } from "./dsp-split-card"
@@ -60,10 +62,7 @@ export default async function AnalyticsPage({
     postedPeriodCode: first(params.postedPeriodCode),
   }
 
-  const [analytics, filterOptions] = await Promise.all([
-    getAnalytics(filters, isVendor ? "vendor" : "admin"),
-    isVendor ? Promise.resolve(null) : getFilterOptions(),
-  ])
+  const filterOptions = isVendor ? null : await getFilterOptions()
 
   return (
     <div className="flex flex-1 flex-col gap-6">
@@ -82,10 +81,29 @@ export default async function AnalyticsPage({
         lockedVendorName={isVendor ? lockedVendorName : undefined}
       />
 
+      {/* Remounts whenever the filters change so the skeleton shows while data loads. */}
+      <Suspense key={JSON.stringify(filters)} fallback={<ContentSkeleton blocks={3} />}>
+        <AnalyticsContent filters={filters} isVendor={isVendor} />
+      </Suspense>
+    </div>
+  )
+}
+
+async function AnalyticsContent({
+  filters,
+  isVendor,
+}: {
+  filters: AnalyticsFilters
+  isVendor: boolean
+}) {
+  const analytics = await getAnalytics(filters, isVendor ? "vendor" : "admin")
+
+  return (
+    <>
       <KpiCards
         summary={analytics.summary}
         showVendorCount={!isVendor}
-        // showGrossRevenue={!isVendor}
+        showGrossRevenue={!isVendor}
       />
 
       <HighlightCards
@@ -132,6 +150,6 @@ export default async function AnalyticsPage({
 
       {/* Monetization quality: volume vs. revenue per stream by customer type */}
       <RevenueTypeMix data={analytics.revenueTypeMix} />
-    </div>
+    </>
   )
 }

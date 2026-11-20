@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 import Link from "next/link"
 import { ArrowRight, Tags, UploadCloud } from "lucide-react"
 
@@ -20,6 +21,7 @@ import { KpiCards } from "../analytics/kpi-cards"
 import { HighlightCards } from "../analytics/highlight-cards"
 import { RevenueTrendChart } from "../analytics/revenue-trend-chart"
 import { RankedList } from "../analytics/top-performers-card"
+import { ContentSkeleton } from "../analytics/content-skeleton"
 import { DateRangePicker, type DashboardRange } from "./date-range-picker"
 
 export const metadata: Metadata = {
@@ -66,56 +68,20 @@ export default async function DashboardPage({
 }) {
   const params = await searchParams
   const session = await auth()
-  await connectToDatabase()
 
   const isVendor = session?.user.role === "vendor"
 
-  let lockedVendorId: string | undefined
-  if (isVendor) {
-    lockedVendorId = session!.user.id
-  }
-
-  // Date range: all time (cumulative) by default, last 30/90 days, or custom.
   const requestedRange = first(params.range)
   let range: DashboardRange =
     requestedRange === "30d" || requestedRange === "90d" || requestedRange === "custom"
       ? requestedRange
       : "all"
-  let dateFrom: string | undefined
-  let dateTo: string | undefined
-  let caption = "Showing cumulative metrics across all data."
+  const customFrom = range === "custom" ? isoDate(first(params.from)) : undefined
+  const customTo = range === "custom" ? isoDate(first(params.to)) : undefined
+  if (range === "custom" && !customFrom && !customTo) range = "all"
 
-  if (range === "30d" || range === "90d") {
-    const days = range === "30d" ? 30 : 90
-    const latest = await getLatestTransactionDate(lockedVendorId)
-    if (latest) {
-      dateTo = latest
-      dateFrom = daysBefore(latest, days - 1)
-      caption = `Last ${days} days of data: ${formatDate(dateFrom)} – ${formatDate(dateTo)}`
-    } else {
-      caption = "No data yet."
-    }
-  } else if (range === "custom") {
-    dateFrom = isoDate(first(params.from))
-    dateTo = isoDate(first(params.to))
-    if (dateFrom && dateTo && dateFrom > dateTo) [dateFrom, dateTo] = [dateTo, dateFrom]
-    if (!dateFrom && !dateTo) {
-      range = "all"
-    } else {
-      caption = dateFrom && dateTo
-        ? `${formatDate(dateFrom)} – ${formatDate(dateTo)}`
-        : dateFrom
-          ? `From ${formatDate(dateFrom)}`
-          : `Up to ${formatDate(dateTo!)}`
-    }
-  }
-
-  const [analytics, recentUploads] = await Promise.all([
-    getAnalytics({ vendorId: lockedVendorId, dateFrom, dateTo }, isVendor ? "vendor" : "admin"),
-    isVendor
-      ? Promise.resolve([])
-      : UploadBatch.find().sort({ createdAt: -1 }).limit(5).lean(),
-  ])
+  // Remounts the Suspense boundary whenever the period changes so the skeleton shows.
+  const suspenseKey = `${range}-${customFrom ?? ""}-${customTo ?? ""}`
 
   return (
     <div className="flex flex-1 flex-col gap-6">
@@ -130,8 +96,82 @@ export default async function DashboardPage({
         </p>
       </div>
 
+      <Suspense
+        key={suspenseKey}
+        fallback={
+          <>
+            <DateRangePicker
+              range={range}
+              from={customFrom}
+              to={customTo}
+              caption="Loading data…"
+            />
+            <ContentSkeleton blocks={2} />
+          </>
+        }
+      >
+        <DashboardContent
+          range={range}
+          customFrom={customFrom}
+          customTo={customTo}
+          isVendor={isVendor}
+          userId={session?.user.id}
+        />
+      </Suspense>
+    </div>
+  )
+}
+
+async function DashboardContent({
+  range,
+  customFrom,
+  customTo,
+  isVendor,
+  userId,
+}: {
+  range: DashboardRange
+  customFrom?: string
+  customTo?: string
+  isVendor: boolean
+  userId?: string
+}) {
+  await connectToDatabase()
+
+  const lockedVendorId = isVendor ? userId : undefined
+
+  let dateFrom: string | undefined = customFrom
+  let dateTo: string | undefined = customTo
+  let caption = "Showing cumulative metrics across all data."
+
+  if (range === "30d" || range === "90d") {
+    const days = range === "30d" ? 30 : 90
+    const latest = await getLatestTransactionDate(lockedVendorId)
+    if (latest) {
+      dateTo = latest
+      dateFrom = daysBefore(latest, days - 1)
+      caption = `Last ${days} days of data: ${formatDate(dateFrom)} – ${formatDate(dateTo)}`
+    } else {
+      caption = "No data yet."
+    }
+  } else if (range === "custom") {
+    if (dateFrom && dateTo && dateFrom > dateTo) [dateFrom, dateTo] = [dateTo, dateFrom]
+    caption = dateFrom && dateTo
+      ? `${formatDate(dateFrom)} – ${formatDate(dateTo)}`
+      : dateFrom
+        ? `From ${formatDate(dateFrom)}`
+        : `Up to ${formatDate(dateTo!)}`
+  }
+
+  const [analytics, recentUploads] = await Promise.all([
+    getAnalytics({ vendorId: lockedVendorId, dateFrom, dateTo }, isVendor ? "vendor" : "admin"),
+    isVendor
+      ? Promise.resolve([])
+      : UploadBatch.find().sort({ createdAt: -1 }).limit(5).lean(),
+  ])
+
+  return (
+    <>
       <DateRangePicker
-        key={`${range}-${dateFrom ?? ""}-${dateTo ?? ""}`}
         range={range}
         from={dateFrom}
         to={dateTo}
@@ -226,6 +266,6 @@ export default async function DashboardPage({
           <ArrowRight />
         </Button>
       </div>
-    </div>
+    </>
   )
 }
